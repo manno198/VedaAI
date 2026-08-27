@@ -6,16 +6,18 @@ export function AppShell({
   children,
   sidebarExpanded = true,
   onBack,
+  onOpenApiKeys,
 }: {
   children: ReactNode;
   sidebarExpanded?: boolean;
   onBack?: () => void;
+  onOpenApiKeys?: () => void;
 }) {
   return (
     <div className="flex min-h-screen">
       <Sidebar expanded={sidebarExpanded} />
       <div className="flex min-h-screen min-w-0 flex-1 flex-col">
-        <TopBar onBack={onBack} />
+        <TopBar onBack={onBack} onOpenApiKeys={onOpenApiKeys} />
         <div className="min-h-0 flex-1">{children}</div>
       </div>
     </div>

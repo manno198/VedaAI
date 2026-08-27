@@ -165,6 +165,21 @@ export function IconArrowRight(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+export function IconKey(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" {...props}>
+      <circle cx="6.5" cy="13.5" r="3" stroke="currentColor" strokeWidth="1.6" />
+      <path
+        d="m8.7 11.3 6.3-6.3M13 6l1.75 1.75M15 4l1.75 1.75"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function IconExpand(props: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 20 20" fill="none" {...props}>

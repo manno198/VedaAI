@@ -1,5 +1,10 @@
 import type { StreamEvent } from "./types";
 
+export type ClientApiKeys = {
+  geminiApiKey?: string;
+  groqApiKey?: string;
+};
+
 /**
  * Uploads the question paper + answer sheet to /api/process and invokes
  * onEvent for each newline-delimited JSON status/result event streamed back.
@@ -10,11 +15,14 @@ export async function processDocuments(
   questionFiles: File[],
   answerFiles: File[],
   onEvent: (event: StreamEvent) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  apiKeys?: ClientApiKeys
 ): Promise<void> {
   const formData = new FormData();
   questionFiles.forEach((f) => formData.append("questionPaper", f));
   answerFiles.forEach((f) => formData.append("answerSheet", f));
+  if (apiKeys?.geminiApiKey) formData.append("geminiApiKey", apiKeys.geminiApiKey);
+  if (apiKeys?.groqApiKey) formData.append("groqApiKey", apiKeys.groqApiKey);
 
   const res = await fetch("/api/process", { method: "POST", body: formData, signal });
   if (!res.ok || !res.body) {

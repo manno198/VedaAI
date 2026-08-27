@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { rasterizeDocument, toDataUrl, type RasterPage } from "@/lib/pdf";
-import { extractQuestions, extractAnswers, gradeAnswer } from "@/lib/ai";
+import { extractQuestions, extractAnswers, gradeAnswer, type ApiKeyOverrides } from "@/lib/ai";
 import { groupAnswerFragments, mapQuestionsToAnswers } from "@/lib/mapping";
 import { formatQuestionLabel } from "@/lib/format";
 import type {
@@ -50,7 +50,11 @@ async function rasterizeAll(files: File[]): Promise<RasterPage[]> {
   return allPages;
 }
 
-async function gradeAll(mapping: MappedItem[], send: (e: StreamEvent) => void) {
+async function gradeAll(
+  mapping: MappedItem[],
+  send: (e: StreamEvent) => void,
+  apiKeys?: ApiKeyOverrides
+) {
   const gradable = mapping.filter((m) => m.status !== "unmatched" && m.question);
   const CONCURRENCY = 3;
   let cursor = 0;
@@ -76,7 +80,8 @@ async function gradeAll(mapping: MappedItem[], send: (e: StreamEvent) => void) {
             question.text,
             item.answer!.transcribedText,
             maxMarks,
-            question.context
+            question.context,
+            apiKeys
           );
           item.grading = {
             score: Math.min(Math.max(result.score, 0), maxMarks),
@@ -147,6 +152,12 @@ export async function POST(req: NextRequest) {
         const formData = await req.formData();
         const questionFiles = formData.getAll("questionPaper").filter((f): f is File => f instanceof File);
         const answerFiles = formData.getAll("answerSheet").filter((f): f is File => f instanceof File);
+        const geminiApiKeyField = formData.get("geminiApiKey");
+        const groqApiKeyField = formData.get("groqApiKey");
+        const apiKeys: ApiKeyOverrides = {
+          gemini: typeof geminiApiKeyField === "string" && geminiApiKeyField.trim() ? geminiApiKeyField.trim() : undefined,
+          groq: typeof groqApiKeyField === "string" && groqApiKeyField.trim() ? groqApiKeyField.trim() : undefined,
+        };
 
         if (questionFiles.length === 0 || answerFiles.length === 0) {
           send({
@@ -174,12 +185,12 @@ export async function POST(req: NextRequest) {
         send({ type: "stage", stage: "convert", status: "done" });
 
         send({ type: "stage", stage: "extract-questions", status: "start" });
-        const questions = await extractQuestions(questionPages);
+        const questions = await extractQuestions(questionPages, apiKeys);
         send({ type: "questions", data: questions });
         send({ type: "stage", stage: "extract-questions", status: "done" });
 
         send({ type: "stage", stage: "extract-answers", status: "start" });
-        const rawFragments = await extractAnswers(answerPages, questions);
+        const rawFragments = await extractAnswers(answerPages, questions, apiKeys);
         const answers = groupAnswerFragments(rawFragments);
         send({ type: "answers", data: answers });
         send({ type: "stage", stage: "extract-answers", status: "done" });
@@ -190,7 +201,7 @@ export async function POST(req: NextRequest) {
         send({ type: "stage", stage: "map", status: "done" });
 
         send({ type: "stage", stage: "grade", status: "start" });
-        await gradeAll(mapping, send);
+        await gradeAll(mapping, send, apiKeys);
         send({ type: "stage", stage: "grade", status: "done" });
 
         const summary = computeSummary(mapping, questions.length);

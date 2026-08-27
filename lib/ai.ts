@@ -17,20 +17,28 @@ import type { Question } from "./types";
 const GEMINI_MODEL_NAME = process.env.GEMINI_MODEL || "gemini-3.6-flash";
 const GROQ_MODEL_NAME = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
-function getGeminiClient() {
-  const apiKey = process.env.GEMINI_API_KEY;
+/** Per-request API key overrides a visitor can supply instead of the server's own keys. */
+export type ApiKeyOverrides = {
+  gemini?: string | null;
+  groq?: string | null;
+};
+
+function getGeminiClient(override?: string | null) {
+  const apiKey = override || process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error(
-      "GEMINI_API_KEY is not set. Copy .env.example to .env.local and add your key."
+      "No Gemini API key available. Enter your own key, or the site owner needs to set GEMINI_API_KEY."
     );
   }
   return new GoogleGenerativeAI(apiKey);
 }
 
-function getGroqClient() {
-  const apiKey = process.env.GROQ_API_KEY;
+function getGroqClient(override?: string | null) {
+  const apiKey = override || process.env.GROQ_API_KEY;
   if (!apiKey) {
-    throw new Error("GROQ_API_KEY is not set. Copy .env.example to .env.local and add your key.");
+    throw new Error(
+      "No Groq API key available. Enter your own key, or the site owner needs to set GROQ_API_KEY."
+    );
   }
   return new Groq({ apiKey });
 }
@@ -62,9 +70,10 @@ IMPORTANT: Your previous response was invalid. Return ONLY a single valid JSON o
 async function generateValidatedJsonGemini<T extends z.ZodTypeAny>(
   parts: Part[],
   prompt: string,
-  schema: T
+  schema: T,
+  apiKey?: string | null
 ): Promise<z.infer<T>> {
-  const client = getGeminiClient();
+  const client = getGeminiClient(apiKey);
   const model = client.getGenerativeModel({
     model: GEMINI_MODEL_NAME,
     generationConfig: { responseMimeType: "application/json" },
@@ -98,9 +107,10 @@ async function generateValidatedJsonGemini<T extends z.ZodTypeAny>(
  */
 async function generateValidatedJsonGroq<T extends z.ZodTypeAny>(
   prompt: string,
-  schema: T
+  schema: T,
+  apiKey?: string | null
 ): Promise<z.infer<T>> {
-  const client = getGroqClient();
+  const client = getGroqClient(apiKey);
 
   const attempt = async (activePrompt: string) => {
     const completion = await client.chat.completions.create({
@@ -151,7 +161,10 @@ Return ONLY a JSON object of this exact shape, nothing else:
   ]
 }`;
 
-export async function extractQuestions(pages: RasterPage[]): Promise<Question[]> {
+export async function extractQuestions(
+  pages: RasterPage[],
+  apiKeys?: ApiKeyOverrides
+): Promise<Question[]> {
   const labeledParts: Part[] = pages.flatMap((page) => [
     { text: `Page ${page.page}:` } as Part,
     pageToPart(page),
@@ -160,7 +173,8 @@ export async function extractQuestions(pages: RasterPage[]): Promise<Question[]>
   const { questions } = await generateValidatedJsonGemini(
     labeledParts,
     QUESTION_EXTRACTION_PROMPT,
-    RawQuestionListSchema
+    RawQuestionListSchema,
+    apiKeys?.gemini
   );
 
   return questions.map((q: RawQuestion, idx: number) => {
@@ -212,7 +226,8 @@ Return ONLY a JSON object of this exact shape, nothing else:
 
 export async function extractAnswers(
   pages: RasterPage[],
-  questions: Question[]
+  questions: Question[],
+  apiKeys?: ApiKeyOverrides
 ): Promise<RawAnswerFragment[]> {
   const labeledParts: Part[] = pages.flatMap((page) => [
     { text: `Page ${page.page}:` } as Part,
@@ -227,7 +242,8 @@ export async function extractAnswers(
   const { answers } = await generateValidatedJsonGemini(
     labeledParts,
     buildAnswerExtractionPrompt(questionRefList),
-    RawAnswerListSchema
+    RawAnswerListSchema,
+    apiKeys?.gemini
   );
 
   return answers;
@@ -243,7 +259,8 @@ export async function gradeAnswer(
   questionText: string,
   answerText: string,
   maxMarks: number,
-  context?: string | null
+  context?: string | null,
+  apiKeys?: ApiKeyOverrides
 ): Promise<GradeResult> {
   const passageBlock = context
     ? `\nSource passage this question is based on — grade strictly against THIS text, not outside knowledge: """${context}"""\n`
@@ -268,5 +285,5 @@ ${
 Return ONLY a JSON object of this exact shape, nothing else:
 { "score": 0, "verdict": "correct" | "partially-correct" | "incorrect", "feedback": "1-2 concise sentences of feedback" }`;
 
-  return generateValidatedJsonGroq(prompt, gradeTextSchema);
+  return generateValidatedJsonGroq(prompt, gradeTextSchema, apiKeys?.groq);
 }

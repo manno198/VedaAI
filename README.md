@@ -17,6 +17,15 @@ Built for the VedaAI hiring assignment.
 
 The spec allows any model with a free tier. Groq is excellent for fast, cheap text inference, but at the time of building this its hosted model catalog (checked live via `GET /openai/v1/models`) had no vision-capable chat model — no way to feed it an image. Since reading the question paper and the handwritten answer sheet (including localizing bounding boxes) is the actual core of this assignment, that step needs a model that can see. Gemini's free tier does, and its `gemini-3.6-flash` model is fast enough for this. Grading is a text-only task (question text + transcribed answer → score/verdict/feedback), so it runs on Groq instead, split cleanly through `lib/ai.ts` so either provider can be swapped independently.
 
+## Bring your own API key
+
+The deployed site ships with the owner's own `GEMINI_API_KEY` / `GROQ_API_KEY` as a shared fallback, so anyone can try it with zero setup — but free-tier quotas are shared across every visitor using that fallback (this is exactly what happened during development: the free Gemini tier's 20-request window got exhausted repeatedly from iterative testing). To avoid one visitor's testing starving everyone else's:
+
+- On first visit, `components/ApiKeyModal.tsx` asks the visitor to choose **"Use the free demo keys"** (the owner's, shared) or **"Use my own API keys"** (their own Gemini/Groq keys, entered in the modal).
+- The choice — and any keys typed in — are saved only in that browser's `localStorage` (`lib/apiKeyStorage.ts`), never sent anywhere except back to this app's own `/api/process` endpoint, and never written to a database or log. A key icon next to the profile avatar in the top bar reopens the modal to change the choice later.
+- When "own keys" is selected, `lib/streamClient.ts` appends `geminiApiKey` / `groqApiKey` as extra fields on the same multipart `FormData` request that already carries the files. The API route reads them (`app/api/process/route.ts`) into an `ApiKeyOverrides` object and threads it through `extractQuestions` / `extractAnswers` / `gradeAnswer` (`lib/ai.ts`), each of which prefers the per-request key and only falls back to `process.env.GEMINI_API_KEY` / `GROQ_API_KEY` when it's absent. Leaving one of the two fields blank while "own keys" is selected just falls that one service back to the shared key — they're independent.
+- This was verified against the real APIs, not just typechecked: a deliberately invalid key sent through the form produced Google's own `400 API_KEY_INVALID` error, confirming the override actually reaches the `generateContent()` call rather than being silently ignored.
+
 ## Architecture
 
 ```mermaid

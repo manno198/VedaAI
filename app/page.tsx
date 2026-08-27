@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AppShell } from "@/components/shell/AppShell";
 import { UploadForm } from "@/components/UploadForm";
 import { LoadingState, type StageState } from "@/components/LoadingState";
 import { ResultsView } from "@/components/ResultsView";
+import { ApiKeyModal } from "@/components/ApiKeyModal";
 import { processDocuments } from "@/lib/streamClient";
+import { loadStoredApiKeys, saveApiKeyChoice, type StoredApiKeys } from "@/lib/apiKeyStorage";
 import type { GradingSummary, MappedItem, PageImage } from "@/lib/types";
 
 type Phase = "upload" | "processing" | "results";
@@ -17,7 +19,21 @@ export default function Home() {
   const [answerPages, setAnswerPages] = useState<PageImage[]>([]);
   const [summary, setSummary] = useState<GradingSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [apiKeyPrefs, setApiKeyPrefs] = useState<StoredApiKeys | null>(null);
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    const stored = loadStoredApiKeys();
+    setApiKeyPrefs(stored);
+    if (!stored) setShowApiKeyModal(true);
+  }, []);
+
+  const handleSaveApiKeys = useCallback((data: StoredApiKeys) => {
+    saveApiKeyChoice(data);
+    setApiKeyPrefs(data);
+    setShowApiKeyModal(false);
+  }, []);
 
   const reset = useCallback(() => {
     abortRef.current?.abort();
@@ -29,62 +45,74 @@ export default function Home() {
     setError(null);
   }, []);
 
-  const handleSubmit = useCallback(async (questionFiles: File[], answerFiles: File[]) => {
-    setPhase("processing");
-    setStages({});
-    setMapping([]);
-    setAnswerPages([]);
-    setSummary(null);
-    setError(null);
+  const handleSubmit = useCallback(
+    async (questionFiles: File[], answerFiles: File[]) => {
+      setPhase("processing");
+      setStages({});
+      setMapping([]);
+      setAnswerPages([]);
+      setSummary(null);
+      setError(null);
 
-    const controller = new AbortController();
-    abortRef.current = controller;
+      const controller = new AbortController();
+      abortRef.current = controller;
 
-    try {
-      await processDocuments(
-        questionFiles,
-        answerFiles,
-        (event) => {
-          switch (event.type) {
-            case "stage":
-              setStages((prev) => ({ ...prev, [event.stage]: event.status }));
-              break;
-            case "images":
-              setAnswerPages(event.data.answerPages);
-              break;
-            case "mapping":
-              setMapping(event.data);
-              break;
-            case "grade":
-              setMapping((prev) =>
-                prev.map((m) => (m.id === event.data.id ? { ...m, grading: event.data.grading } : m))
-              );
-              break;
-            case "summary":
-              setSummary(event.data);
-              break;
-            case "done":
-              setMapping(event.data.mapping);
-              setAnswerPages(event.data.answerPages);
-              setSummary(event.data.summary);
-              setPhase("results");
-              break;
-            case "error":
-              setError(event.message);
-              break;
-          }
-        },
-        controller.signal
-      );
-    } catch (err) {
-      if (!controller.signal.aborted) {
-        setError(err instanceof Error ? err.message : "Something went wrong while processing.");
+      try {
+        await processDocuments(
+          questionFiles,
+          answerFiles,
+          (event) => {
+            switch (event.type) {
+              case "stage":
+                setStages((prev) => ({ ...prev, [event.stage]: event.status }));
+                break;
+              case "images":
+                setAnswerPages(event.data.answerPages);
+                break;
+              case "mapping":
+                setMapping(event.data);
+                break;
+              case "grade":
+                setMapping((prev) =>
+                  prev.map((m) => (m.id === event.data.id ? { ...m, grading: event.data.grading } : m))
+                );
+                break;
+              case "summary":
+                setSummary(event.data);
+                break;
+              case "done":
+                setMapping(event.data.mapping);
+                setAnswerPages(event.data.answerPages);
+                setSummary(event.data.summary);
+                setPhase("results");
+                break;
+              case "error":
+                setError(event.message);
+                break;
+            }
+          },
+          controller.signal,
+          apiKeyPrefs?.choice === "own"
+            ? { geminiApiKey: apiKeyPrefs.geminiApiKey, groqApiKey: apiKeyPrefs.groqApiKey }
+            : undefined
+        );
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          setError(err instanceof Error ? err.message : "Something went wrong while processing.");
+        }
       }
-    }
-  }, []);
+    },
+    [apiKeyPrefs]
+  );
 
   return (
-    <AppShell sidebarExpanded={phase === "upload"} onBack={phase !== "upload" ? reset : undefined}>
+    <AppShell
+      sidebarExpanded={phase === "upload"}
+      onBack={phase !== "upload" ? reset : undefined}
+      onOpenApiKeys={() => setShowApiKeyModal(true)}
+    >
+      {showApiKeyModal && <ApiKeyModal initial={apiKeyPrefs} onSave={handleSaveApiKeys} />}
+
       {phase === "upload" && (
         <div className="mx-auto max-w-4xl">
           <UploadForm onSubmit={handleSubmit} />
