@@ -1,101 +1,116 @@
-import Image from "next/image";
+"use client";
+
+import { useCallback, useRef, useState } from "react";
+import { AppShell } from "@/components/shell/AppShell";
+import { UploadForm } from "@/components/UploadForm";
+import { LoadingState, type StageState } from "@/components/LoadingState";
+import { ResultsView } from "@/components/ResultsView";
+import { processDocuments } from "@/lib/streamClient";
+import type { GradingSummary, MappedItem, PageImage } from "@/lib/types";
+
+type Phase = "upload" | "processing" | "results";
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="https://nextjs.org/icons/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const [phase, setPhase] = useState<Phase>("upload");
+  const [stages, setStages] = useState<StageState>({});
+  const [mapping, setMapping] = useState<MappedItem[]>([]);
+  const [answerPages, setAnswerPages] = useState<PageImage[]>([]);
+  const [summary, setSummary] = useState<GradingSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="https://nextjs.org/icons/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const reset = useCallback(() => {
+    abortRef.current?.abort();
+    setPhase("upload");
+    setStages({});
+    setMapping([]);
+    setAnswerPages([]);
+    setSummary(null);
+    setError(null);
+  }, []);
+
+  const handleSubmit = useCallback(async (questionFiles: File[], answerFiles: File[]) => {
+    setPhase("processing");
+    setStages({});
+    setMapping([]);
+    setAnswerPages([]);
+    setSummary(null);
+    setError(null);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      await processDocuments(
+        questionFiles,
+        answerFiles,
+        (event) => {
+          switch (event.type) {
+            case "stage":
+              setStages((prev) => ({ ...prev, [event.stage]: event.status }));
+              break;
+            case "images":
+              setAnswerPages(event.data.answerPages);
+              break;
+            case "mapping":
+              setMapping(event.data);
+              break;
+            case "grade":
+              setMapping((prev) =>
+                prev.map((m) => (m.id === event.data.id ? { ...m, grading: event.data.grading } : m))
+              );
+              break;
+            case "summary":
+              setSummary(event.data);
+              break;
+            case "done":
+              setMapping(event.data.mapping);
+              setAnswerPages(event.data.answerPages);
+              setSummary(event.data.summary);
+              setPhase("results");
+              break;
+            case "error":
+              setError(event.message);
+              break;
+          }
+        },
+        controller.signal
+      );
+    } catch (err) {
+      if (!controller.signal.aborted) {
+        setError(err instanceof Error ? err.message : "Something went wrong while processing.");
+      }
+    }
+  }, []);
+
+  return (
+    <AppShell sidebarExpanded={phase === "upload"} onBack={phase !== "upload" ? reset : undefined}>
+      {phase === "upload" && (
+        <div className="mx-auto max-w-4xl">
+          <UploadForm onSubmit={handleSubmit} />
+          {error && (
+            <p className="mx-auto -mt-4 max-w-3xl rounded-lg bg-danger-light px-4 py-3 text-sm text-danger">
+              {error}
+            </p>
+          )}
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+      )}
+
+      {phase === "processing" && (
+        <div className="flex h-full flex-col">
+          <LoadingState stages={stages} />
+          {error && (
+            <div className="mx-auto -mt-16 max-w-md rounded-lg bg-danger-light px-4 py-3 text-center text-sm text-danger">
+              <p>{error}</p>
+              <button type="button" onClick={reset} className="mt-2 font-semibold underline underline-offset-2">
+                Start over
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {phase === "results" && <ResultsView mapping={mapping} answerPages={answerPages} summary={summary} />}
+    </AppShell>
   );
 }
