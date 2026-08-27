@@ -4,6 +4,10 @@ A teacher uploads a question paper and one student's handwritten answer sheet. T
 
 Built for the VedaAI hiring assignment.
 
+## Live Demo
+
+**[https://vedaai-azure.vercel.app/](https://vedaai-azure.vercel.app/)**
+
 ## Tech stack
 
 - **Next.js 14** (App Router) + TypeScript + Tailwind CSS
@@ -189,10 +193,8 @@ Note `unmatched` answers (fragments that never matched a question) are never sen
 - **UI matches exported Figma screens**, not a live Figma connection. The design file itself needs a logged-in session that automated fetching can't reach; the teacher (empty/filled) exported screenshots for the upload, loading, and question/answer-mapping screens (desktop + mobile), which this UI was built to match directly — dark icon sidebar, orange/coral accent system, letter-badge sub-parts, and the green highlight-with-tag on the answer sheet. The one deviation is the loading screen's teacher illustration, which is a stylized placeholder (an emoji avatar in a decorated circle) since the original artwork asset wasn't extractable from a screenshot.
 - **`pdf-to-img`'s pdfjs-dist dependency has an open advisory** for arbitrary JS execution when opening a maliciously crafted PDF (`GHSA-hq66-cqwq-w95j`). Since this app rasterizes user-uploaded PDFs server-side, that's a real consideration for a production deployment — fixing it means a breaking downgrade of `pdf-to-img`, out of scope for this assignment, but worth flagging rather than silently shipping.
 
-## Deploying to Vercel
+---
 
-```bash
-vercel
-```
+Made by Harshita Singh.
 
-Set `GEMINI_API_KEY` and `GROQ_API_KEY` (and optionally `GEMINI_MODEL` / `GROQ_MODEL`) as environment variables in the Vercel project settings. `vercel.json` extends the API route's max duration to 60s for longer documents. No other server state assumptions exist — every request is self-contained.
+I used Claude as a supporting tool during development for understanding concepts, debugging, and getting guidance on implementation decisions. The application, architecture, and final implementation were developed and integrated by me.
