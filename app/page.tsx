@@ -20,13 +20,17 @@ export default function Home() {
   const [summary, setSummary] = useState<GradingSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [apiKeyPrefs, setApiKeyPrefs] = useState<StoredApiKeys | null>(null);
+  // Shown on every fresh visit/reload of the home page (pre-filled from any
+  // saved preference), not just the first time — see onOpenApiKeys for the
+  // manual reopen path, which uses the same modal. Stays false until the
+  // localStorage read below completes, so the modal never mounts with a
+  // stale/empty `initial` before the saved preference is available.
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    const stored = loadStoredApiKeys();
-    setApiKeyPrefs(stored);
-    if (!stored) setShowApiKeyModal(true);
+    setApiKeyPrefs(loadStoredApiKeys());
+    setShowApiKeyModal(true);
   }, []);
 
   const handleSaveApiKeys = useCallback((data: StoredApiKeys) => {
