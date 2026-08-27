@@ -17,6 +17,59 @@ Built for the VedaAI hiring assignment.
 
 The spec allows any model with a free tier. Groq is excellent for fast, cheap text inference, but at the time of building this its hosted model catalog (checked live via `GET /openai/v1/models`) had no vision-capable chat model — no way to feed it an image. Since reading the question paper and the handwritten answer sheet (including localizing bounding boxes) is the actual core of this assignment, that step needs a model that can see. Gemini's free tier does, and its `gemini-3.6-flash` model is fast enough for this. Grading is a text-only task (question text + transcribed answer → score/verdict/feedback), so it runs on Groq instead, split cleanly through `lib/ai.ts` so either provider can be swapped independently.
 
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph Browser["Browser (client)"]
+        Page["app/page.tsx<br/>upload -&gt; processing -&gt; results state machine"]
+        Upload["UploadForm.tsx"]
+        Loading["LoadingState.tsx"]
+        Results["ResultsView.tsx"]
+        QList["QuestionList.tsx"]
+        AView["AnswerViewer.tsx"]
+        SummaryC["SummaryCard.tsx"]
+        StreamClient["lib/streamClient.ts<br/>fetch + ReadableStream reader"]
+
+        Page --> Upload
+        Page --> Loading
+        Page --> Results
+        Results --> QList
+        Results --> AView
+        Results --> SummaryC
+        Page --> StreamClient
+    end
+
+    subgraph Server["Next.js server - app/api/process/route.ts (Node.js runtime)"]
+        Route["POST handler<br/>streams NDJSON events"]
+        PdfLib["lib/pdf.ts<br/>rasterizeDocument()"]
+        AiLib["lib/ai.ts<br/>extractQuestions / extractAnswers / gradeAnswer"]
+        MappingLib["lib/mapping.ts<br/>groupAnswerFragments / mapQuestionsToAnswers"]
+        SchemaLib["lib/schemas.ts<br/>Zod validation + retry-once"]
+
+        Route --> PdfLib
+        Route --> AiLib
+        Route --> MappingLib
+        AiLib --> SchemaLib
+    end
+
+    subgraph External["External APIs (free tier)"]
+        Gemini["Google Gemini<br/>gemini-3.6-flash<br/>vision: questions, answers, bounding boxes"]
+        Groq["Groq<br/>openai/gpt-oss-120b<br/>text-only grading"]
+    end
+
+    StreamClient -- "POST multipart FormData<br/>(question paper + answer sheet files)" --> Route
+    Route -- "NDJSON stream<br/>(stage / questions / answers / mapping / grade / summary / done)" --> StreamClient
+
+    AiLib -- "generateContent()" --> Gemini
+    AiLib -- "chat.completions.create()" --> Groq
+
+    NoDB["No database - the FullPayload lives only in<br/>server memory for one request,<br/>then in React state on the client"]
+    Route -.-> NoDB
+```
+
+There's no server the client talks to besides this one route, and no data store anywhere — every box above except the two external AI APIs lives inside this single Next.js project, and `NoDB` is the actual state of the world, not a caveat.
+
 ## Setup
 
 ```bash
@@ -31,7 +84,61 @@ Open http://localhost:3000.
 
 ## Approach
 
-**Pipeline** (`app/api/process/route.ts`), streamed to the client as newline-delimited JSON events so the progress stepper reflects real backend state, not a fake spinner:
+**Pipeline** (`app/api/process/route.ts`), streamed to the client as newline-delimited JSON events so the progress stepper reflects real backend state, not a fake spinner. This is the actual sequence the single `POST` handler executes, top to bottom, in one request:
+
+```mermaid
+sequenceDiagram
+    participant U as Teacher (browser)
+    participant C as Client (page.tsx + streamClient.ts)
+    participant S as API route (process/route.ts)
+    participant P as lib/pdf.ts
+    participant G as Gemini (vision)
+    participant M as lib/mapping.ts
+    participant Q as Groq (grading)
+
+    U->>C: Upload question paper + answer sheet
+    C->>S: POST /api/process (multipart FormData)
+    activate S
+
+    S-->>C: stage: upload done
+    S->>P: rasterizeDocument() for both files
+    P-->>S: PNG pages (PDFs rasterized page-by-page, images pass through)
+    S-->>C: images event (page thumbnails) + stage: convert done
+
+    S->>G: extractQuestions(questionPages)
+    G-->>S: questions[] (number, subpart, text, marks, context)
+    S-->>C: questions event + stage: extract-questions done
+
+    S->>G: extractAnswers(answerPages, questions) — grounded by the known question list
+    G-->>S: raw answer fragments (questionNumber, subpart, text, boundingBox, confidence)
+    S->>M: groupAnswerFragments(fragments)
+    M-->>S: Answer[] occurrences (same-page collisions kept separate,<br/>cross-page continuations merged)
+    S-->>C: answers event + stage: extract-answers done
+
+    S->>M: mapQuestionsToAnswers(questions, answers)
+    M-->>S: MappedItem[] (answered / unanswered / unmatched)
+    S-->>C: mapping event + stage: map done
+
+    loop each answered/unanswered question, concurrency 3
+        alt status = unanswered
+            S->>S: score 0, verdict incorrect (no model call)
+        else status = answered
+            S->>Q: gradeAnswer(question text, transcribed answer, maxMarks, context)
+            Q-->>S: score, verdict, feedback
+        end
+        S-->>C: grade event (streamed per question as it completes)
+    end
+    S-->>C: stage: grade done
+
+    S->>S: computeSummary(mapping) - totals, % answered, weak areas, assumedMarksCount
+    S-->>C: summary event
+    S-->>C: done event (full payload) + stage: done
+    deactivate S
+
+    C->>U: Render two-pane results (QuestionList + AnswerViewer)
+```
+
+Note `unmatched` answers (fragments that never matched a question) are never sent to Groq — grading only runs over `mapping` items with a real `question`.
 
 1. **Upload** — both documents arrive as `FormData` (PDF and/or image files, multiple allowed per side).
 2. **Convert** — every file is rasterized to PNG pages (`lib/pdf.ts`). Images pass through unchanged; PDFs are rendered page-by-page via `pdf-to-img`. Pages are numbered continuously if a document is uploaded as multiple files.
