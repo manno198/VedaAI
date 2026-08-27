@@ -1,14 +1,24 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { estimatePageCount } from "@/lib/estimatePages";
+import { compressImageFile } from "@/lib/compressImage";
 import { IconArrowRight, IconUpload } from "@/components/icons";
 
 type UploadedFile = { file: File; pages: number | null };
 
+// Vercel's serverless functions hard-cap the request body at ~4.5MB; this
+// leaves margin below that for multipart overhead. See README's "Serverless
+// request size/time" limitation.
+const SAFE_TOTAL_BYTES = 4 * 1024 * 1024;
+
 function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))}KB`;
-  return `${Math.round(bytes / (1024 * 1024))}MB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+
+function isPdfFile(file: File): boolean {
+  return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
 
 function PdfChipIcon() {
@@ -35,7 +45,12 @@ function Dropzone({
     async (incoming: FileList | null) => {
       if (!incoming || incoming.length === 0) return;
       const next = await Promise.all(
-        Array.from(incoming).map(async (file) => ({ file, pages: await estimatePageCount(file) }))
+        Array.from(incoming).map(async (rawFile) => {
+          // PDFs pass through untouched — only images get client-side re-encoded,
+          // since PDF recompression risks corrupting/degrading the document.
+          const file = isPdfFile(rawFile) ? rawFile : await compressImageFile(rawFile);
+          return { file, pages: await estimatePageCount(file) };
+        })
       );
       onFilesChange([...files, ...next]);
     },
@@ -151,7 +166,13 @@ export function UploadForm({
   const [questionFiles, setQuestionFiles] = useState<UploadedFile[]>([]);
   const [answerFiles, setAnswerFiles] = useState<UploadedFile[]>([]);
 
-  const canSubmit = questionFiles.length > 0 && answerFiles.length > 0 && !disabled;
+  const totalBytes = useMemo(
+    () => [...questionFiles, ...answerFiles].reduce((sum, f) => sum + f.file.size, 0),
+    [questionFiles, answerFiles]
+  );
+  const overSizeLimit = totalBytes > SAFE_TOTAL_BYTES;
+  const hasFiles = questionFiles.length > 0 && answerFiles.length > 0;
+  const canSubmit = hasFiles && !disabled && !overSizeLimit;
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col items-center px-4 py-10 sm:py-14">
@@ -173,7 +194,9 @@ export function UploadForm({
       <div className="mt-8 flex w-full flex-col items-center gap-2">
         <div
           className={
-            canSubmit
+            hasFiles && overSizeLimit
+              ? "w-full max-w-sm rounded-2xl border-2 border-dashed border-danger/50 bg-danger-light p-3"
+              : canSubmit
               ? ""
               : "w-full max-w-xs rounded-2xl border-2 border-dashed border-accent/50 bg-accent-light/20 p-3"
           }
@@ -192,9 +215,18 @@ export function UploadForm({
             <IconArrowRight className="h-4 w-4" />
           </button>
         </div>
-        <p className="text-center text-xs text-black/40">
-          Once both files are uploaded, you&apos;ll able to map answers with questions
-        </p>
+
+        {hasFiles && overSizeLimit ? (
+          <p className="max-w-sm text-center text-xs text-danger">
+            Combined upload is {formatSize(totalBytes)}, which is too large to process — please use
+            smaller files (max ~{formatSize(SAFE_TOTAL_BYTES)} total; images are compressed
+            automatically, but PDFs aren&apos;t, so try a smaller or lower-resolution PDF).
+          </p>
+        ) : (
+          <p className="text-center text-xs text-black/40">
+            Once both files are uploaded, you&apos;ll able to map answers with questions
+          </p>
+        )}
       </div>
     </div>
   );
