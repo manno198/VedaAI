@@ -12,8 +12,9 @@ import type {
   MappedItem,
 } from "@/lib/types";
 
-// pdf-to-img relies on native canvas bindings and Node Buffers, so this
-// route must run on the Node.js runtime (not the Edge runtime).
+// PDF rasterization (lib/pdf.ts) relies on pdfjs-dist + @napi-rs/canvas's
+// native canvas bindings and Node Buffers, so this route must run on the
+// Node.js runtime (not the Edge runtime).
 export const runtime = "nodejs";
 export const maxDuration = 60;
 

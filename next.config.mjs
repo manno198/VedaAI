@@ -1,20 +1,25 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    serverComponentsExternalPackages: ["pdf-to-img", "@napi-rs/canvas"],
-    // pdf-to-img and pdfjs-dist both resolve files (pdfjs-dist/package.json,
-    // @napi-rs/canvas, its native binary, pdfjs-dist's font/cmap data) via
-    // `createRequire(import.meta.url).resolve(...)` — a dynamically
-    // constructed require that Next's build-time file tracer can't follow.
-    // On Vercel, which only ships a traced subset of node_modules per
-    // function, that leaves pieces of this dependency tree silently missing
-    // at runtime (this has already bitten twice, at two different files, so
-    // rather than patch each opaque require one at a time, the whole
-    // pdf-to-img tree — including its nested pdfjs-dist and @napi-rs/canvas
-    // — is force-included). It works locally only because the full
-    // node_modules tree is already on disk, untraced.
+    serverComponentsExternalPackages: ["pdfjs-dist", "@napi-rs/canvas"],
+    // pdfjs-dist's own Node canvas factory resolves @napi-rs/canvas (and its
+    // platform-specific native binary) via a dynamically-constructed
+    // `createRequire(import.meta.url).resolve(...)` call, invisible to
+    // Next's build-time file tracer. On Vercel that silently leaves the
+    // native binary out of the deployed function bundle even though it's
+    // present at build time — confirmed via this project's own trace
+    // manifest (.next/server/app/api/process/route.js.nft.json). Both
+    // pdfjs-dist and @napi-rs/canvas are now direct (not nested) project
+    // dependencies specifically so these globs are simple, unambiguous
+    // top-level paths rather than reaching two levels into another
+    // package's own node_modules.
     outputFileTracingIncludes: {
-      "/api/process": ["./node_modules/pdf-to-img/**/*"],
+      "/api/process": [
+        "./node_modules/pdfjs-dist/**/*",
+        "./node_modules/@napi-rs/canvas/**/*",
+        "./node_modules/@napi-rs/canvas-linux-x64-gnu/**/*",
+        "./node_modules/@napi-rs/canvas-linux-x64-musl/**/*",
+      ],
     },
   },
 };
