@@ -89,7 +89,7 @@ function Dropzone({
         ref={inputRef}
         type="file"
         multiple
-        accept=".pdf,.png,.jpg,.jpeg,.webp"
+        accept=".pdf,application/pdf,.png,image/png,.jpg,.jpeg,image/jpeg,.webp,image/webp"
         className="hidden"
         onChange={(e) => {
           addFiles(e.target.files);
