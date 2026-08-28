@@ -18,6 +18,18 @@ import type {
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+// Temporary diagnostic instrumentation to find which stage is responsible
+// for the Vercel Hobby 60s function-duration ceiling being hit. Logs appear
+// in Vercel's runtime logs tagged "[timing]"; safe/cheap to leave in.
+async function timed<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const start = Date.now();
+  try {
+    return await fn();
+  } finally {
+    console.log(`[timing] ${label}: ${Date.now() - start}ms`);
+  }
+}
+
 function pagesToPageImages(pages: RasterPage[]): PageImage[] {
   return pages.map((p) => ({
     page: p.page,
@@ -172,10 +184,12 @@ export async function POST(req: NextRequest) {
         send({ type: "stage", stage: "upload", status: "done" });
 
         send({ type: "stage", stage: "convert", status: "start" });
-        const [questionPages, answerPages] = await Promise.all([
-          rasterizeAll(questionFiles),
-          rasterizeAll(answerFiles),
-        ]);
+        const [questionPages, answerPages] = await timed("convert", () =>
+          Promise.all([rasterizeAll(questionFiles), rasterizeAll(answerFiles)])
+        );
+        console.log(
+          `[timing] convert: ${questionPages.length} question page(s), ${answerPages.length} answer page(s)`
+        );
         send({
           type: "images",
           data: {
@@ -186,12 +200,14 @@ export async function POST(req: NextRequest) {
         send({ type: "stage", stage: "convert", status: "done" });
 
         send({ type: "stage", stage: "extract-questions", status: "start" });
-        const questions = await extractQuestions(questionPages, apiKeys);
+        const questions = await timed("extract-questions", () => extractQuestions(questionPages, apiKeys));
         send({ type: "questions", data: questions });
         send({ type: "stage", stage: "extract-questions", status: "done" });
 
         send({ type: "stage", stage: "extract-answers", status: "start" });
-        const rawFragments = await extractAnswers(answerPages, questions, apiKeys);
+        const rawFragments = await timed("extract-answers", () =>
+          extractAnswers(answerPages, questions, apiKeys)
+        );
         const answers = groupAnswerFragments(rawFragments);
         send({ type: "answers", data: answers });
         send({ type: "stage", stage: "extract-answers", status: "done" });
@@ -202,7 +218,7 @@ export async function POST(req: NextRequest) {
         send({ type: "stage", stage: "map", status: "done" });
 
         send({ type: "stage", stage: "grade", status: "start" });
-        await gradeAll(mapping, send, apiKeys);
+        await timed("grade", () => gradeAll(mapping, send, apiKeys));
         send({ type: "stage", stage: "grade", status: "done" });
 
         const summary = computeSummary(mapping, questions.length);

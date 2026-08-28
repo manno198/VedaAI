@@ -88,7 +88,14 @@ async function generateValidatedJsonGemini<T extends z.ZodTypeAny>(
 
   try {
     return await attempt(prompt);
-  } catch {
+  } catch (firstErr) {
+    // Diagnostic: a retry here means a second full Gemini round-trip,
+    // which can be enough on its own to blow a 60s budget.
+    console.warn(
+      `[timing] Gemini call failed validation, retrying: ${
+        firstErr instanceof Error ? firstErr.message : String(firstErr)
+      }`
+    );
     try {
       return await attempt(prompt + STRICT_JSON_SUFFIX);
     } catch (retryErr) {
@@ -125,7 +132,12 @@ async function generateValidatedJsonGroq<T extends z.ZodTypeAny>(
 
   try {
     return await attempt(prompt);
-  } catch {
+  } catch (firstErr) {
+    console.warn(
+      `[timing] Groq call failed validation, retrying: ${
+        firstErr instanceof Error ? firstErr.message : String(firstErr)
+      }`
+    );
     try {
       return await attempt(prompt + STRICT_JSON_SUFFIX);
     } catch (retryErr) {
