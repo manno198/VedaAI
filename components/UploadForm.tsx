@@ -7,9 +7,11 @@ import { IconArrowRight, IconUpload } from "@/components/icons";
 
 type UploadedFile = { file: File; pages: number | null };
 
-// Vercel's serverless functions hard-cap the request body at ~4.5MB; this
-// leaves margin below that for multipart overhead. See README's "Serverless
-// request size/time" limitation.
+// Originally sized to stay under Vercel's ~4.5MB serverless request-body cap.
+// Now deployed on Render (a normal persistent server, no such platform cap),
+// but kept as a sane upload-size guardrail regardless of host — a document
+// this large is also just slow to upload and process. Revisit if it turns
+// out to be overly conservative for real classroom documents.
 const SAFE_TOTAL_BYTES = 4 * 1024 * 1024;
 
 function formatSize(bytes: number): string {
@@ -21,10 +23,15 @@ function isPdfFile(file: File): boolean {
   return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
 
-function PdfChipIcon() {
+function FileChipIcon({ file }: { file: File }) {
+  const isPdf = isPdfFile(file);
   return (
-    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-danger text-[10px] font-bold text-white">
-      PDF
+    <span
+      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-[10px] font-bold text-white ${
+        isPdf ? "bg-danger" : "bg-accent"
+      }`}
+    >
+      {isPdf ? "PDF" : "IMG"}
     </span>
   );
 }
@@ -108,7 +115,7 @@ function Dropzone({
               onClick={(e) => e.stopPropagation()}
               className="flex items-center gap-3 rounded-xl border border-black/5 bg-white px-3 py-2.5 text-left shadow-sm"
             >
-              <PdfChipIcon />
+              <FileChipIcon file={f.file} />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold text-ink">{f.file.name}</p>
                 <p className="text-xs text-black/40">
